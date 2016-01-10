@@ -1,0 +1,207 @@
+#!/usr/bin/env ruby
+
+#   Script name:   airlines
+#   Created on:    2016-01-06
+#   Author:        Marek Gajewski
+
+# Description
+
+# This is the simple script to determine if airline CODE 
+# is of IATA or ICAO type.
+
+require 'date'
+require 'csv'
+
+SHORT_HELP = 'Use airlines --help for more info'
+HELP = <<-HTML
+NAME
+  airlines -- script which process data of airlines flights
+
+SYNOPSIS
+  airlines <INPUT FILE> <OUTPUT FILE>
+
+  INPUT FILE - input file path
+  OUTPUT FILE - output file path
+
+INPUT FILE
+  CSV file representing flights, should contain columns:
+    id - Identifier of flight [string]
+    carrier_code - IATA or ICAO airline code [string]
+    flight_number - [string]
+    flight_date - date ISO 8601 formatted [string]
+HTML
+
+# Main class AirLines
+class AirLines
+  ERROR_FILE  = './error.csv'
+
+  attr_reader :input_file, :output_file, :error_file
+
+  # Line parser class
+  # valid and prepare output line
+  class LineParser
+    IATA = 'IATA'
+    ICAO = 'ICAO'
+
+    attr_reader :id, :carrier_code, :flight_nr, :valid_date,\
+                :flight_date, :carrier_type
+
+    class << self
+      def error_header
+        %w(id carrier_code flight_number flight_date).to_csv
+      end
+
+      def result_header
+        %w(id carrier_code_type carrier_code flight_number date).to_csv
+      end
+    end
+
+    def initialize(row)
+      @id           = row.fetch(:id, nil)
+      @carrier_code = row.fetch(:carrier_code, nil)
+      @flight_nr    = row.fetch(:flight_number, nil)
+      @flight_date  = row.fetch(:flight_date, nil)
+
+      @valid_date   = date_parse(@flight_date)
+      @carrier_type = carrier_code_match(@carrier_code) if @carrier_code
+    end
+
+    def to_csv
+      if valid?
+        [@id, @carrier_type, @carrier_code, @flight_nr, @valid_date].to_csv
+      else
+        [@id, @carrier_code, @flight_nr, @flight_date].to_csv
+      end
+    end
+
+    def valid?
+      attrs.all?
+    end
+
+    def empty?
+      !attrs.any?
+    end
+
+    def attrs
+      instance_variables.map { |ivar| instance_variable_get ivar }
+    end
+
+    private
+
+    # returns date if ISO 8601 formatted
+    def date_parse(date)
+      date if date && Date.strptime(date, '%Y-%m-%d').to_s == date
+    rescue => _ # for rubocop :)
+      nil
+    end
+
+    def carrier_code_match(carrier_code)
+      carrier_code.match(/(^[A-Z|\d]{2}\*?$)|(^[A-Z]{3}$)/) do
+        if Regexp.last_match[1]
+          IATA
+        elsif Regexp.last_match[2]
+          ICAO
+        end
+      end
+    end
+  end
+
+  class << self
+    attr_reader :input_file, :output_file, :error_file
+
+    def process!(input, output)
+      init_files(input, output)
+      proccess_lines(input)
+      print "See results in '#{output}', and errors in '#{ERROR_FILE}'\n"
+    rescue => e
+      puts e
+    ensure
+      close_files
+    end
+
+    private
+
+    # Reads each line and checks if it correct
+    # writes correct lines to output_flie
+    # writes errors to error_flie
+    def proccess_lines(input)
+      CSV.foreach(input, headers: true, header_converters: :symbol) do |row|
+        line_parser = LineParser.new(row)
+
+        if line_parser.valid?
+          output_file << line_parser.to_csv
+        elsif !line_parser.empty?
+          error_file << line_parser.to_csv
+        end
+      end
+    end
+
+    # Opens or creates files if posible
+    #
+    # @return [true, false]
+    def init_files(input, output)
+      can_read?(input)
+
+      @output_file = prepare_write_file(output)
+      @error_file  = prepare_write_file(ERROR_FILE)
+
+      @output_file << LineParser.result_header
+      @error_file << LineParser.error_header
+    end
+
+    # ensure close files if opened
+    def close_files
+      @input_file.close   if @input_file
+      @output_file.close  if @output_file
+      @error_file.close   if @error_file
+    end
+
+    # Checks file if exists and can be readable
+    #
+    # @return [false, #File]
+    def can_read?(file)
+      if !File.exist?(file)
+        fail "ERROR: File #{file} does not exists"
+      elsif !File.readable?(file)
+        fail "ERROR: File #{file} is not readable"
+      end
+    end
+
+    # checks if file exists and can by overwriten or can create file
+    #
+    # @return [false, #File]
+    def prepare_write_file(file)
+      if File.exist?(file)
+        unless overwrite_file?(file)
+          fail 'Progrm execution terminated due to file error'
+        end
+        fail "File '#{file}' is not writable" unless File.writable?(file)
+      end
+
+      File.open(file, 'w')
+    end
+
+    def overwrite_file?(file)
+      print "File '#{file}' exists, do you want to overwrite this file [Yn]: "
+
+      keychar = $stdin.gets.downcase
+      until keychar.match(/^(y|n|)$/)
+        print 'You can choose only [Y] or [n]: '
+        keychar = $stdin.gets.downcase
+      end
+
+      !(keychar =~ /^n$/)
+    end
+  end
+end
+
+if ARGV.empty?
+  puts SHORT_HELP
+elsif ARGV.first.match(/^(--help|-h)$/)
+  puts HELP
+elsif ARGV.count == 2
+  input_file, output_file = *ARGV
+  AirLines.process!(input_file, output_file)
+else
+  puts 'airlines script takes two arguments. ' + SHORT_HELP
+end
