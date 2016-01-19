@@ -42,19 +42,11 @@ class AirLines
   class LineParser
     IATA = 'IATA'
     ICAO = 'ICAO'
+    ERROR_HEADER = %w(id carrier_code flight_number flight_date)
+    RESULT_HEADER = %w(id carrier_code_type carrier_code flight_number date)
 
     attr_reader :id, :carrier_code, :flight_nr, :valid_date,\
                 :flight_date, :carrier_type
-
-    class << self
-      def error_header
-        %w(id carrier_code flight_number flight_date).to_csv
-      end
-
-      def result_header
-        %w(id carrier_code_type carrier_code flight_number date).to_csv
-      end
-    end
 
     def initialize(row)
       @id           = row.fetch(:id, nil)
@@ -145,8 +137,8 @@ class AirLines
       @output_file = prepare_write_file(output)
       @error_file  = prepare_write_file(ERROR_FILE)
 
-      @output_file << LineParser.result_header
-      @error_file << LineParser.error_header
+      @output_file << LineParser::RESULT_HEADER.to_csv
+      @error_file << LineParser::ERROR_HEADER.to_csv
     end
 
     # ensure close files if opened
